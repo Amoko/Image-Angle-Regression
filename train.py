@@ -17,7 +17,7 @@ import torch.optim as optim
 from torchvision import models
 from torchsummary import summary
 
-from torch.cuda.amp import autocast
+from torch.cuda.amp import autocast, GradScaler
 from dataloader_csv import get_dataloader
 
 
@@ -100,7 +100,7 @@ def get_model_regression(DEVICE=torch.device('cpu')):
     return model
     
 
-def train(model, opt, DEVICE, train_loader, epoch):
+def train(model, opt, DEVICE, train_loader, epoch, scaler):
     model.train()
     train_loss = 0
     margin = 0
@@ -119,6 +119,15 @@ def train(model, opt, DEVICE, train_loader, epoch):
         opt.zero_grad()
         loss.backward()
         opt.step()
+
+        opt.zero_grad()
+        if cfg.amp:
+            scaler.scale(loss).backward()
+            scaler.step(opt)
+            scaler.update()
+        else:
+            loss.backward()
+            opt.step()
         
         train_loss += loss.item()
         diff = get_angle_diff(angles.tolist(), outputs.tolist())
@@ -203,13 +212,16 @@ if __name__ == '__main__':
     # 2 loss, opt
     #criterion = nn.MSELoss()
     opt = optim.Adam(model.parameters(),lr=cfg.LR)
-
+    if cfg.amp:
+        scaler = GradScaler()
+    else:
+        scaler = None
 
     # 3 train
     best_val_margin = 100
     best_epoch = 0
     for epoch in range(1, 10000+1):
-        train_loss, train_margin = train(model, opt, DEVICE, train_loader, epoch)
+        train_loss, train_margin = train(model, opt, DEVICE, train_loader, epoch, scaler)
         
         val_loss, val_margin = validation(model, DEVICE, val_loader, epoch)
 
